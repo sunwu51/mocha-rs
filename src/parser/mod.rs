@@ -2,7 +2,6 @@ pub mod parser;
 
 use crate::lexer::TokenKind::{LBRACKET, LPAREN};
 use crate::lexer::{Token, TokenKind};
-use as_any::AsAny;
 use phf::{phf_map, Map};
 use std::ops::Index;
 

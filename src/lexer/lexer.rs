@@ -1,5 +1,4 @@
 use serde_json::Value;
-use regex::Regex;
 use crate::lexer::{Token, TokenKind, KEYWORDS};
 
 pub fn lex(input: &str) -> Vec<Token> {

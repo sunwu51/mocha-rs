@@ -2,9 +2,7 @@ pub mod eval;
 
 use crate::eval::eval::{eval_block, eval_expression};
 use crate::parser::{BlockStatement, Statement};
-use lazy_static::lazy_static;
 use log::debug;
-use once_cell::sync::Lazy;
 use std::cell::{Ref, RefCell};
 use std::collections::{HashMap, VecDeque};
 use std::f32::consts::E;
@@ -16,7 +14,6 @@ use std::sync::{Arc, LockResult, Mutex};
 use std::{fmt, panic};
 use std::num::ParseFloatError;
 
-// static NULL: Lazy<Mutex<Element>> = Lazy::new(|| Mutex::new(Element::new_null()));
 static EL_ID: AtomicU64 = AtomicU64::new(100);
 
 pub static PROTO_TYPE: &str = "$$pro$$";

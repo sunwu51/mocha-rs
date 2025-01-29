@@ -9,7 +9,6 @@ use crate::parser::{
     InfixOperatorAstNode, OperatorAstNode, PostfixOperatorAstNode, PrefixOperatorAstNode,
     Statement,
 };
-use as_any::Downcast;
 use log::debug;
 use std::any::Any;
 use std::cell::RefCell;
