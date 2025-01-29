@@ -266,11 +266,6 @@ fn append_to_file<P: AsRef<Path>>(path: P, content: &str) -> io::Result<()> {
     file.write_all(content.as_bytes())?;
     Ok(())
 }
-fn unescape(input: &str) -> String {
-    let json_str = format!("\"{}\"", input);
-    let value: Value = serde_json::from_str(&json_str).unwrap();
-    value.as_str().unwrap_or("").to_string()
-}
 
 fn escape(input: &str) -> String {
     serde_json::to_string(input).unwrap_or_else(|_| String::new())

@@ -770,8 +770,8 @@ fn eval_statement(statement: &Statement, mut ctx: Rc<RefCell<Context>>) -> Rc<Re
         Statement::Throw(throw_statement) => {
             let err = eval_expression(&throw_statement.value, ctx.clone());
             let x = match &mut *err.borrow_mut() {
-                Element::Error(ref mut errorElement) => {
-                    errorElement.push_stack(ErrorInfo {
+                Element::Error(ref mut error_element) => {
+                    error_element.push_stack(ErrorInfo {
                         function_name: ctx.borrow().get_function_name(),
                         position: format!(
                             "{}:{}",
@@ -779,7 +779,7 @@ fn eval_statement(statement: &Statement, mut ctx: Rc<RefCell<Context>>) -> Rc<Re
                             statement.get_token().column
                         ),
                     });
-                    errorElement.to_thread_safe()
+                    error_element.to_thread_safe()
                 }
                 _ => panic_any(SimpleError::new("Throw error should be an error element")),
             };

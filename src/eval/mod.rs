@@ -803,10 +803,12 @@ pub fn get_string_proto() -> Rc<RefCell<Element>> {
     };
     let substring = |this: &mut Element, vec: Vec<Rc<RefCell<Element>>>| match this {
         Element::String{ value, .. } => {
+            let value = value.chars().collect::<Vec<char>>();
             match (&*vec[0].borrow(), &*vec[1].borrow()) {
                 (Element::Number {value: start,..}, Element::Number {value: end,..}) => {
                     let res = &value[(*start as usize) ..(*end as usize)];
-                    Rc::new(RefCell::new(Element::new_string(res.to_string())))
+                    let res = String::from_iter(res.iter());
+                    Rc::new(RefCell::new(Element::new_string(res)))
                 }
                 (_,_) => {
                     panic_any(SimpleError::new("substring need 2 number params"))
