@@ -1,18 +1,14 @@
 pub mod eval;
 
-use crate::eval::eval::{eval_block, eval_expression};
+use crate::eval::eval::eval_block;
 use crate::parser::{BlockStatement, Statement};
 use log::debug;
-use std::cell::{Ref, RefCell};
+use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
-use std::f32::consts::E;
-use std::ops::{DerefMut, Index};
+use std::panic;
 use std::panic::{panic_any, AssertUnwindSafe};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, LockResult, Mutex};
-use std::{fmt, panic};
-use std::num::ParseFloatError;
 
 static EL_ID: AtomicU64 = AtomicU64::new(100);
 
@@ -99,16 +95,6 @@ impl ElementCommon {
         None
     }
 
-    pub fn get_from_cur(&self, key: &str) -> Option<Rc<RefCell<Element>>> {
-        // println!("get key={}", key);
-        let from_map = self.map.get(key).clone();
-        if !from_map.is_none() {
-            // 自身属性
-            return Some(from_map.unwrap().clone());
-        }
-        None
-    }
-
     pub fn set(&mut self, key: &str, value: Rc<RefCell<Element>>) {
         self.map.insert(key.to_string(), value);
     }
@@ -121,14 +107,6 @@ impl Element {
             map: Default::default(),
         })
     }
-    pub fn new_obj(class_name: &str) -> Element {
-        let mut common = ElementCommon::new();
-        common.set(
-            "type",
-            Rc::new(RefCell::new(Element::new_string(class_name.to_string()))),
-        );
-        Element::Object(common)
-    }
     pub fn new_number(value: f64) -> Element {
         Element::Number {
             common: ElementCommon::new(),
@@ -138,10 +116,7 @@ impl Element {
     pub fn new_string(value: String) -> Element {
         let mut common = ElementCommon::new();
         common.set(PROTO_TYPE, get_string_proto());
-        Element::String {
-            common,
-            value,
-        }
+        Element::String { common, value }
     }
     pub fn new_boolean(value: bool) -> Element {
         Element::Boolean {
@@ -162,14 +137,6 @@ impl Element {
             array: VecDeque::from(array),
         }
     }
-    pub fn new_error(message: String) -> Element {
-        let mut res = Element::Error(ErrorElement {
-            common: ElementCommon::new(),
-        });
-        res.set("msg", Rc::new(RefCell::new(Element::new_string(message))));
-        res.set("stack", Rc::new(RefCell::new(Element::new_array(vec![]))));
-        res
-    }
     pub fn new_prototype(
         class_name: &str,
         parent: Option<Rc<RefCell<Element>>>,
@@ -177,7 +144,6 @@ impl Element {
     ) -> Element {
         let mut common = ElementCommon::new();
         let mut proto_type = Element::new();
-
 
         if class_name != "" {
             proto_type.set(
@@ -212,7 +178,11 @@ impl Element {
             closure_ctx: context,
         }
     }
-    pub fn new_native_function(name: String, param_count: usize, native_func: fn(&mut Self, Vec<Rc<RefCell<Element>>>) -> Rc<RefCell<Element>>) -> Element {
+    pub fn new_native_function(
+        name: String,
+        param_count: usize,
+        native_func: fn(&mut Self, Vec<Rc<RefCell<Element>>>) -> Rc<RefCell<Element>>,
+    ) -> Element {
         Element::NativeFunction {
             common: ElementCommon::new(),
             name,
@@ -256,41 +226,96 @@ impl Element {
                     .join(", ")
             ),
             Element::Error(ErrorElement { common, .. }) => {
-                format!("msg => {}; stack => {}", common.get("msg").unwrap_or(get_null()).borrow().to_string(),
-                        common.get("stack").unwrap_or(get_null()).borrow().to_string())
+                format!(
+                    "msg => {}; stack => {}",
+                    common.get("msg").unwrap_or(get_null()).borrow().to_string(),
+                    common
+                        .get("stack")
+                        .unwrap_or(get_null())
+                        .borrow()
+                        .to_string()
+                )
             }
             Element::ProtoType { common, .. } => format!("{{ {} }}", common.to_string()),
-            Element::Function { body, .. } => "FUNCTION".to_string(), //Statement::Block(body.clone()).to_string(),
-            Element::NativeFunction { .. } => "NATIVEFUNC".to_string(),
+            Element::Function { .. } => "FUNCTION".to_string(), //Statement::Block(body.clone()).to_string(),
+            Element::NativeFunction { name, .. } => format!("NATIVEFUNC {}", name),
         }
     }
     pub fn get(&self, key: &str) -> Option<Rc<RefCell<Element>>> {
         debug!("get {}", key);
         match self {
             Element::Object(common) => common.get(key),
-            Element::Number { common, .. } => if key == "type" {Some(Rc::new(RefCell::new(Element::new_string("number".to_string())))) } else { common.get(key)},
-            Element::String { common, .. } => if key == "type" {Some(Rc::new(RefCell::new(Element::new_string("string".to_string())))) } else { common.get(key)},
-            Element::Boolean { common, .. } => if key == "type" {Some(Rc::new(RefCell::new(Element::new_string("boolean".to_string())))) } else { common.get(key)},
-            Element::Null { common, .. } => if key == "constructor" || key == "$$pro$$" { None } else { panic_any(SimpleError::new("null point exception"))},
-            Element::Array { common, .. } => if key == "type" {Some(Rc::new(RefCell::new(Element::new_string("array".to_string())))) } else { common.get(key)},
-            Element::Error(ErrorElement { common, .. }) => if key == "type" {Some(Rc::new(RefCell::new(Element::new_string("error".to_string())))) } else { common.get(key)},
+            Element::Number { common, .. } => {
+                if key == "type" {
+                    Some(Rc::new(RefCell::new(Element::new_string(
+                        "number".to_string(),
+                    ))))
+                } else {
+                    common.get(key)
+                }
+            }
+            Element::String { common, .. } => {
+                if key == "type" {
+                    Some(Rc::new(RefCell::new(Element::new_string(
+                        "string".to_string(),
+                    ))))
+                } else {
+                    common.get(key)
+                }
+            }
+            Element::Boolean { common, .. } => {
+                if key == "type" {
+                    Some(Rc::new(RefCell::new(Element::new_string(
+                        "boolean".to_string(),
+                    ))))
+                } else {
+                    common.get(key)
+                }
+            }
+            Element::Null { .. } => {
+                if key == "constructor" || key == "$$pro$$" {
+                    None
+                } else {
+                    panic_any(SimpleError::new("null point exception"))
+                }
+            }
+            Element::Array { common, .. } => {
+                if key == "type" {
+                    Some(Rc::new(RefCell::new(Element::new_string(
+                        "array".to_string(),
+                    ))))
+                } else {
+                    common.get(key)
+                }
+            }
+            Element::Error(ErrorElement { common, .. }) => {
+                if key == "type" {
+                    Some(Rc::new(RefCell::new(Element::new_string(
+                        "error".to_string(),
+                    ))))
+                } else {
+                    common.get(key)
+                }
+            }
             Element::ProtoType { common, .. } => common.get(key),
-            Element::Function { common, .. } => if key == "type" {Some(Rc::new(RefCell::new(Element::new_string("function".to_string())))) } else { common.get(key)},
-            Element::NativeFunction { common, .. } => if key == "type" {Some(Rc::new(RefCell::new(Element::new_string("function".to_string())))) } else { common.get(key)},
-        }
-    }
-    pub fn get_from_cur(&self, key: &str) -> Option<Rc<RefCell<Element>>> {
-        match self {
-            Element::Object(common) => common.get_from_cur(key),
-            Element::Number { common, .. } => common.get_from_cur(key),
-            Element::String { common, .. } => common.get_from_cur(key),
-            Element::Boolean { common, .. } => common.get_from_cur(key),
-            Element::Null { common, .. } => common.get_from_cur(key),
-            Element::Array { common, .. } => common.get_from_cur(key),
-            Element::Error(ErrorElement { common, .. }) => common.get_from_cur(key),
-            Element::ProtoType { common, .. } => common.get_from_cur(key),
-            Element::Function { common, .. } => common.get_from_cur(key),
-            Element::NativeFunction { common, .. } => common.get_from_cur(key),
+            Element::Function { common, .. } => {
+                if key == "type" {
+                    Some(Rc::new(RefCell::new(Element::new_string(
+                        "function".to_string(),
+                    ))))
+                } else {
+                    common.get(key)
+                }
+            }
+            Element::NativeFunction { common, .. } => {
+                if key == "type" {
+                    Some(Rc::new(RefCell::new(Element::new_string(
+                        "function".to_string(),
+                    ))))
+                } else {
+                    common.get(key)
+                }
+            }
         }
     }
     pub fn set(&mut self, key: &str, val: Rc<RefCell<Element>>) {
@@ -411,7 +436,7 @@ impl Element {
                                 let msg = simple_err.msg.to_string();
                                 let mut stack = simple_err.stack.clone();
                                 let length = stack.len();
-                                let mut last = &mut stack[length - 1];
+                                let last = &mut stack[length - 1];
                                 if last.function_name == "" {
                                     last.function_name = name.to_string();
                                 }
@@ -438,15 +463,20 @@ impl Element {
         }
     }
 
-    pub fn native_function_call(&mut self,
-                                name: &str,
-                                args: Vec<Rc<RefCell<Element>>>,
-                                this: Option<Rc<RefCell<Element>>>,
-                                su: Option<Rc<RefCell<Element>>>,
-                                position: &str,
+    pub fn native_function_call(
+        &mut self,
+        _name: &str,
+        args: Vec<Rc<RefCell<Element>>>,
+        this: Option<Rc<RefCell<Element>>>,
+        _su: Option<Rc<RefCell<Element>>>,
+        _position: &str,
     ) -> Rc<RefCell<Element>> {
         match self {
-            Element::NativeFunction { name, param_count, native_func,.. } => {
+            Element::NativeFunction {
+                param_count,
+                native_func,
+                ..
+            } => {
                 let mut args_clone = args.clone();
                 while args_clone.len() < *param_count {
                     args_clone.push(get_null());
@@ -481,15 +511,11 @@ impl ErrorElement {
         let stack = self.common.get("stack").unwrap();
         let mut stack = stack.borrow_mut();
         match &mut *stack {
-            Element::Array { array, .. } => array.push_back(Rc::new(RefCell::new(info.to_element()))),
+            Element::Array { array, .. } => {
+                array.push_back(Rc::new(RefCell::new(info.to_element())))
+            }
             _ => panic_any(SimpleError::new("Stack element is not an array")),
         }
-    }
-    pub fn update_function_name(&mut self, name: &str) {
-        self.common.set(
-            "function_name",
-            Rc::new(RefCell::new(Element::new_string(name.to_string()))),
-        );
     }
 
     pub fn to_thread_safe(&self) -> SimpleError {
@@ -507,7 +533,6 @@ impl ErrorElement {
         };
         x
     }
-
 }
 
 #[derive(Clone, Debug)]
@@ -527,18 +552,11 @@ impl SimpleError {
             stack: vec![ErrorInfo {
                 function_name: "".to_string(),
                 position: "".to_string(),
-            }]
+            }],
         }
     }
 }
 impl ErrorInfo {
-    pub fn new(function_name: String, position: String) -> ErrorInfo {
-        ErrorInfo {
-            function_name,
-            position,
-        }
-    }
-
     pub fn to_element(&self) -> Element {
         let mut common = ElementCommon::new();
         common.set(
@@ -551,7 +569,7 @@ impl ErrorInfo {
             "position",
             Rc::new(RefCell::new(Element::new_string(self.position.to_string()))),
         );
-        Element::Object({ common })
+        Element::Object(common)
     }
 
     pub fn from_element(element: &Element) -> ErrorInfo {
@@ -620,7 +638,7 @@ impl Context {
         } else if self.parent.is_none() {
             return get_null();
         } else {
-            let mut parent = self.parent.as_ref().unwrap().borrow_mut();
+            let parent = self.parent.as_ref().unwrap().borrow_mut();
             parent.get(key)
         }
     }
@@ -629,11 +647,7 @@ impl Context {
         match &self.fun_ctx.name {
             None => {
                 if self.parent.is_some() {
-                    self.parent
-                        .as_ref()
-                        .unwrap()
-                        .borrow()
-                        .get_function_name()
+                    self.parent.as_ref().unwrap().borrow().get_function_name()
                 } else {
                     "__root__".to_string()
                 }
@@ -698,200 +712,344 @@ pub fn get_false() -> Rc<RefCell<Element>> {
 }
 pub fn get_array_proto() -> Rc<RefCell<Element>> {
     let mut methods = HashMap::new();
-    let length = |this: &mut Element, vec: Vec<Rc<RefCell<Element>>>| match this {
-        Element::Array{ array, .. } => Rc::new(RefCell::new(Element::new_number(array.len() as f64))),
+    let length = |this: &mut Element, _vec: Vec<Rc<RefCell<Element>>>| match this {
+        Element::Array { array, .. } => {
+            Rc::new(RefCell::new(Element::new_number(array.len() as f64)))
+        }
         _ => get_null(),
     };
     let push = |this: &mut Element, vec: Vec<Rc<RefCell<Element>>>| {
         match this {
-            Element::Array{ array, .. } => { array.push_back(vec[0].clone()); },
-            _ => ()
+            Element::Array { array, .. } => {
+                array.push_back(vec[0].clone());
+            }
+            _ => (),
         }
         get_null()
     };
-    let pop = |this: &mut Element, vec: Vec<Rc<RefCell<Element>>>| {
+    let pop = |this: &mut Element, _vec: Vec<Rc<RefCell<Element>>>| {
         let item = match this {
-            Element::Array{ array, .. } => array.pop_back(),
-            _ => None
+            Element::Array { array, .. } => array.pop_back(),
+            _ => None,
         };
         match item {
             Some(item) => item,
-            _ => get_null()
+            _ => get_null(),
         }
     };
     let unshift = |this: &mut Element, vec: Vec<Rc<RefCell<Element>>>| {
         match this {
-            Element::Array{ array, .. } => { array.push_front(vec[0].clone()); },
-            _ => ()
+            Element::Array { array, .. } => {
+                array.push_front(vec[0].clone());
+            }
+            _ => (),
         }
         get_null()
     };
-    let shift = |this: &mut Element, vec: Vec<Rc<RefCell<Element>>>| {
+    let shift = |this: &mut Element, _vec: Vec<Rc<RefCell<Element>>>| {
         let item = match this {
-            Element::Array{ array, .. } => array.pop_front(),
-            _ => None
+            Element::Array { array, .. } => array.pop_front(),
+            _ => None,
         };
         match item {
             Some(item) => item,
-            _ => get_null()
+            _ => get_null(),
         }
     };
-    let join = |this: &mut Element, vec: Vec<Rc<RefCell<Element>>>| {
-        match this {
-            Element::Array{ array, .. } => Rc::new(RefCell::new(Element::new_string(array.iter().map(|it| it.borrow().to_string()).collect::<Vec<String>>().join(vec[0].borrow().to_string().as_str())))),
-            _ => get_null()
-        }
+    let join = |this: &mut Element, vec: Vec<Rc<RefCell<Element>>>| match this {
+        Element::Array { array, .. } => Rc::new(RefCell::new(Element::new_string(
+            array
+                .iter()
+                .map(|it| it.borrow().to_string())
+                .collect::<Vec<String>>()
+                .join(vec[0].borrow().to_string().as_str()),
+        ))),
+        _ => get_null(),
     };
-    methods.insert("length".to_string(), Rc::new(RefCell::new(Element::new_native_function("length".to_string(), 0, length))));
-    methods.insert("push".to_string(), Rc::new(RefCell::new(Element::new_native_function("push".to_string(), 1, push))));
-    methods.insert("pop".to_string(), Rc::new(RefCell::new(Element::new_native_function("pop".to_string(), 0, pop))));
-    methods.insert("unshift".to_string(), Rc::new(RefCell::new(Element::new_native_function("unshift".to_string(), 1, unshift))));
-    methods.insert("shift".to_string(), Rc::new(RefCell::new(Element::new_native_function("shift".to_string(), 0, shift))));
-    methods.insert("join".to_string(), Rc::new(RefCell::new(Element::new_native_function("join".to_string(), 1, join))));
+    methods.insert(
+        "length".to_string(),
+        Rc::new(RefCell::new(Element::new_native_function(
+            "length".to_string(),
+            0,
+            length,
+        ))),
+    );
+    methods.insert(
+        "push".to_string(),
+        Rc::new(RefCell::new(Element::new_native_function(
+            "push".to_string(),
+            1,
+            push,
+        ))),
+    );
+    methods.insert(
+        "pop".to_string(),
+        Rc::new(RefCell::new(Element::new_native_function(
+            "pop".to_string(),
+            0,
+            pop,
+        ))),
+    );
+    methods.insert(
+        "unshift".to_string(),
+        Rc::new(RefCell::new(Element::new_native_function(
+            "unshift".to_string(),
+            1,
+            unshift,
+        ))),
+    );
+    methods.insert(
+        "shift".to_string(),
+        Rc::new(RefCell::new(Element::new_native_function(
+            "shift".to_string(),
+            0,
+            shift,
+        ))),
+    );
+    methods.insert(
+        "join".to_string(),
+        Rc::new(RefCell::new(Element::new_native_function(
+            "join".to_string(),
+            1,
+            join,
+        ))),
+    );
     Rc::new(RefCell::new(Element::new_prototype("", None, methods)))
 }
 
 pub fn get_string_proto() -> Rc<RefCell<Element>> {
     let mut methods = HashMap::new();
-    let length = |this: &mut Element, vec: Vec<Rc<RefCell<Element>>>| match this {
-        Element::String{ value, .. } => Rc::new(RefCell::new(Element::new_number(value.chars().collect::<Vec<char>>().len() as f64))),
+    let length = |this: &mut Element, _vec: Vec<Rc<RefCell<Element>>>| match this {
+        Element::String { value, .. } => Rc::new(RefCell::new(Element::new_number(
+            value.chars().collect::<Vec<char>>().len() as f64,
+        ))),
         _ => get_null(),
     };
     let split = |this: &mut Element, vec: Vec<Rc<RefCell<Element>>>| match this {
-        Element::String{ value, .. } => {
-            let arr = value.split(&vec[0].borrow().to_string()).collect::<Vec<&str>>();
-            let array = arr.iter().map(|it| Rc::new(RefCell::new(Element::new_string(it.to_string())))).collect::<Vec<Rc<RefCell<Element>>>>();
+        Element::String { value, .. } => {
+            let arr = value
+                .split(&vec[0].borrow().to_string())
+                .collect::<Vec<&str>>();
+            let array = arr
+                .iter()
+                .map(|it| Rc::new(RefCell::new(Element::new_string(it.to_string()))))
+                .collect::<Vec<Rc<RefCell<Element>>>>();
             Rc::new(RefCell::new(Element::new_array(array)))
-        },
+        }
         _ => get_null(),
     };
     let index_of = |this: &mut Element, vec: Vec<Rc<RefCell<Element>>>| match this {
-        Element::String{ value, .. } => {
-            match value.find(&vec[0].borrow().to_string().as_str()) {
-                None => Rc::new(RefCell::new(Element::new_number(-1 as f64))),
-                Some(index) =>Rc::new(RefCell::new(Element::new_number(index as f64)))
-            }
+        Element::String { value, .. } => match value.find(&vec[0].borrow().to_string().as_str()) {
+            None => Rc::new(RefCell::new(Element::new_number(-1 as f64))),
+            Some(index) => Rc::new(RefCell::new(Element::new_number(index as f64))),
         },
         _ => get_null(),
     };
     let starts_with = |this: &mut Element, vec: Vec<Rc<RefCell<Element>>>| match this {
-        Element::String{ value, .. } => {
+        Element::String { value, .. } => {
             if value.starts_with(&vec[0].borrow().to_string().as_str()) {
                 get_true()
             } else {
                 get_false()
             }
-        },
+        }
         _ => get_null(),
     };
     let ends_with = |this: &mut Element, vec: Vec<Rc<RefCell<Element>>>| match this {
-        Element::String{ value, .. } => {
+        Element::String { value, .. } => {
             if value.ends_with(&vec[0].borrow().to_string().as_str()) {
                 get_true()
             } else {
                 get_false()
             }
-        },
+        }
         _ => get_null(),
     };
     let replace_all = |this: &mut Element, vec: Vec<Rc<RefCell<Element>>>| match this {
-        Element::String{ value, .. } => {
-            let res = value.replace(&vec[0].borrow().to_string().as_str(), &vec[1].borrow().to_string().as_str());
+        Element::String { value, .. } => {
+            let res = value.replace(
+                &vec[0].borrow().to_string().as_str(),
+                &vec[1].borrow().to_string().as_str(),
+            );
             Rc::new(RefCell::new(Element::new_string(res)))
-        },
+        }
         _ => get_null(),
     };
     let substring = |this: &mut Element, vec: Vec<Rc<RefCell<Element>>>| match this {
-        Element::String{ value, .. } => {
+        Element::String { value, .. } => {
             let value = value.chars().collect::<Vec<char>>();
             match (&*vec[0].borrow(), &*vec[1].borrow()) {
-                (Element::Number {value: start,..}, Element::Number {value: end,..}) => {
-                    let res = &value[(*start as usize) ..(*end as usize)];
+                (Element::Number { value: start, .. }, Element::Number { value: end, .. }) => {
+                    let res = &value[(*start as usize)..(*end as usize)];
                     let res = String::from_iter(res.iter());
                     Rc::new(RefCell::new(Element::new_string(res)))
                 }
-                (_,_) => {
-                    panic_any(SimpleError::new("substring need 2 number params"))
-                }
+                (_, _) => panic_any(SimpleError::new("substring need 2 number params")),
             }
-        },
+        }
         _ => get_null(),
     };
-    let to_uppercase = |this: &mut Element, vec: Vec<Rc<RefCell<Element>>>| match this {
-        Element::String{ value, .. } => {
-            Rc::new(RefCell::new(Element::new_string(value.to_uppercase().to_string())))
-        },
+    let to_uppercase = |this: &mut Element, _vec: Vec<Rc<RefCell<Element>>>| match this {
+        Element::String { value, .. } => Rc::new(RefCell::new(Element::new_string(
+            value.to_uppercase().to_string(),
+        ))),
         _ => get_null(),
     };
-    let to_lowercase = |this: &mut Element, vec: Vec<Rc<RefCell<Element>>>| match this {
-        Element::String{ value, .. } => {
-            Rc::new(RefCell::new(Element::new_string(value.to_lowercase().to_string())))
-        },
+    let to_lowercase = |this: &mut Element, _vec: Vec<Rc<RefCell<Element>>>| match this {
+        Element::String { value, .. } => Rc::new(RefCell::new(Element::new_string(
+            value.to_lowercase().to_string(),
+        ))),
         _ => get_null(),
     };
-    let trim = |this: &mut Element, vec: Vec<Rc<RefCell<Element>>>| match this {
-        Element::String{ value, .. } => {
+    let trim = |this: &mut Element, _vec: Vec<Rc<RefCell<Element>>>| match this {
+        Element::String { value, .. } => {
             Rc::new(RefCell::new(Element::new_string(value.trim().to_string())))
-        },
+        }
         _ => get_null(),
     };
-    let trim_left = |this: &mut Element, vec: Vec<Rc<RefCell<Element>>>| match this {
-        Element::String{ value, .. } => {
-            Rc::new(RefCell::new(Element::new_string(value.trim_start().to_string())))
-        },
+    let trim_left = |this: &mut Element, _vec: Vec<Rc<RefCell<Element>>>| match this {
+        Element::String { value, .. } => Rc::new(RefCell::new(Element::new_string(
+            value.trim_start().to_string(),
+        ))),
         _ => get_null(),
     };
-    let trim_right = |this: &mut Element, vec: Vec<Rc<RefCell<Element>>>| match this {
-        Element::String{ value, .. } => {
-            Rc::new(RefCell::new(Element::new_string(value.trim_end().to_string())))
-        },
+    let trim_right = |this: &mut Element, _vec: Vec<Rc<RefCell<Element>>>| match this {
+        Element::String { value, .. } => Rc::new(RefCell::new(Element::new_string(
+            value.trim_end().to_string(),
+        ))),
         _ => get_null(),
     };
-    let to_number = |this: &mut Element, vec: Vec<Rc<RefCell<Element>>>| match this {
-        Element::String{ value, .. } => {
-            match value.parse::<f64>() {
-                Ok(n) => {
-                    Rc::new(RefCell::new(Element::new_number(n)))
-                }
-                Err(_) => {
-                    panic_any(SimpleError::new("string cannot be parsed as number"))
-                }
-            }
+    let to_number = |this: &mut Element, _vec: Vec<Rc<RefCell<Element>>>| match this {
+        Element::String { value, .. } => match value.parse::<f64>() {
+            Ok(n) => Rc::new(RefCell::new(Element::new_number(n))),
+            Err(_) => panic_any(SimpleError::new("string cannot be parsed as number")),
         },
         _ => get_null(),
     };
     let char_at = |this: &mut Element, vec: Vec<Rc<RefCell<Element>>>| match this {
-        Element::String{ value, .. } => {
-            match &*vec[0].borrow() {
-                Element::Number{ value : index, .. } => {
-                    let v: Vec<char> = value.chars().collect::<Vec<char>>();
-                    match v.iter().nth(*index as usize) {
-                        None => {
-                            get_null()
-                        }
-                        Some(c) => {
-                            Rc::new(RefCell::new(Element::new_string(format!("{}", c))))
-                        }
-                    }
+        Element::String { value, .. } => match &*vec[0].borrow() {
+            Element::Number { value: index, .. } => {
+                let v: Vec<char> = value.chars().collect::<Vec<char>>();
+                match v.iter().nth(*index as usize) {
+                    None => get_null(),
+                    Some(c) => Rc::new(RefCell::new(Element::new_string(format!("{}", c)))),
                 }
-                _ => panic_any(SimpleError::new("charAt should use a number"))
             }
+            _ => panic_any(SimpleError::new("charAt should use a number")),
         },
         _ => get_null(),
     };
-    methods.insert("length".to_string(), Rc::new(RefCell::new(Element::new_native_function("length".to_string(), 0, length))));
-    methods.insert("split".to_string(), Rc::new(RefCell::new(Element::new_native_function("split".to_string(), 1, split))));
-    methods.insert("indexOf".to_string(), Rc::new(RefCell::new(Element::new_native_function("indexOf".to_string(), 1, index_of))));
-    methods.insert("charAt".to_string(), Rc::new(RefCell::new(Element::new_native_function("charAt".to_string(), 1, char_at))));
-    methods.insert("replaceAll".to_string(), Rc::new(RefCell::new(Element::new_native_function("replaceAll".to_string(), 2, replace_all))));
-    methods.insert("startsWith".to_string(), Rc::new(RefCell::new(Element::new_native_function("startsWith".to_string(), 1, starts_with))));
-    methods.insert("endsWith".to_string(), Rc::new(RefCell::new(Element::new_native_function("endsWith".to_string(), 1, ends_with))));
-    methods.insert("substring".to_string(), Rc::new(RefCell::new(Element::new_native_function("substring".to_string(), 2, substring))));
-    methods.insert("toUpperCase".to_string(), Rc::new(RefCell::new(Element::new_native_function("toUpperCase".to_string(), 0, to_uppercase))));
-    methods.insert("toLowerCase".to_string(), Rc::new(RefCell::new(Element::new_native_function("toLowerCase".to_string(), 0, to_lowercase))));
-    methods.insert("trim".to_string(), Rc::new(RefCell::new(Element::new_native_function("trim".to_string(), 0, trim))));
-    methods.insert("trimLeft".to_string(), Rc::new(RefCell::new(Element::new_native_function("trimLeft".to_string(), 0, trim_left))));
-    methods.insert("trimRight".to_string(), Rc::new(RefCell::new(Element::new_native_function("trimRight".to_string(), 0, trim_right))));
-    methods.insert("toNumber".to_string(), Rc::new(RefCell::new(Element::new_native_function("toNumber".to_string(), 0, to_number))));
+    methods.insert(
+        "length".to_string(),
+        Rc::new(RefCell::new(Element::new_native_function(
+            "length".to_string(),
+            0,
+            length,
+        ))),
+    );
+    methods.insert(
+        "split".to_string(),
+        Rc::new(RefCell::new(Element::new_native_function(
+            "split".to_string(),
+            1,
+            split,
+        ))),
+    );
+    methods.insert(
+        "indexOf".to_string(),
+        Rc::new(RefCell::new(Element::new_native_function(
+            "indexOf".to_string(),
+            1,
+            index_of,
+        ))),
+    );
+    methods.insert(
+        "charAt".to_string(),
+        Rc::new(RefCell::new(Element::new_native_function(
+            "charAt".to_string(),
+            1,
+            char_at,
+        ))),
+    );
+    methods.insert(
+        "replaceAll".to_string(),
+        Rc::new(RefCell::new(Element::new_native_function(
+            "replaceAll".to_string(),
+            2,
+            replace_all,
+        ))),
+    );
+    methods.insert(
+        "startsWith".to_string(),
+        Rc::new(RefCell::new(Element::new_native_function(
+            "startsWith".to_string(),
+            1,
+            starts_with,
+        ))),
+    );
+    methods.insert(
+        "endsWith".to_string(),
+        Rc::new(RefCell::new(Element::new_native_function(
+            "endsWith".to_string(),
+            1,
+            ends_with,
+        ))),
+    );
+    methods.insert(
+        "substring".to_string(),
+        Rc::new(RefCell::new(Element::new_native_function(
+            "substring".to_string(),
+            2,
+            substring,
+        ))),
+    );
+    methods.insert(
+        "toUpperCase".to_string(),
+        Rc::new(RefCell::new(Element::new_native_function(
+            "toUpperCase".to_string(),
+            0,
+            to_uppercase,
+        ))),
+    );
+    methods.insert(
+        "toLowerCase".to_string(),
+        Rc::new(RefCell::new(Element::new_native_function(
+            "toLowerCase".to_string(),
+            0,
+            to_lowercase,
+        ))),
+    );
+    methods.insert(
+        "trim".to_string(),
+        Rc::new(RefCell::new(Element::new_native_function(
+            "trim".to_string(),
+            0,
+            trim,
+        ))),
+    );
+    methods.insert(
+        "trimLeft".to_string(),
+        Rc::new(RefCell::new(Element::new_native_function(
+            "trimLeft".to_string(),
+            0,
+            trim_left,
+        ))),
+    );
+    methods.insert(
+        "trimRight".to_string(),
+        Rc::new(RefCell::new(Element::new_native_function(
+            "trimRight".to_string(),
+            0,
+            trim_right,
+        ))),
+    );
+    methods.insert(
+        "toNumber".to_string(),
+        Rc::new(RefCell::new(Element::new_native_function(
+            "toNumber".to_string(),
+            0,
+            to_number,
+        ))),
+    );
     Rc::new(RefCell::new(Element::new_prototype("", None, methods)))
 }

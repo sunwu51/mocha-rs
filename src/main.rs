@@ -5,16 +5,16 @@ mod lexer;
 mod parser;
 mod sdk;
 
-use crate::eval::eval::{eval_block, eval_statements};
-use crate::eval::{Context, Element, ErrorElement, SimpleError};
+use crate::eval::eval::eval_statements;
+use crate::eval::SimpleError;
+use crate::sdk::get_build_in_ctx;
 use lexer::lexer as LEX;
 use parser::parser as PARSER;
 use std::cell::RefCell;
-use std::{fs, io, panic};
 use std::io::Write;
 use std::panic::{panic_any, AssertUnwindSafe};
 use std::rc::Rc;
-use crate::sdk::get_build_in_ctx;
+use std::{fs, io, panic};
 
 fn main() {
     panic::set_hook(Box::new(|_| {}));
@@ -29,15 +29,15 @@ fn main() {
             Ok(code) => {
                 let tokens = LEX::lex(&code);
                 let statements = PARSER::Parser::new(tokens).parse();
-                let mut ctx = Rc::new(RefCell::new(get_build_in_ctx()));
-                let res = eval_statements(&statements, ctx.clone(), true);
+                let ctx = Rc::new(RefCell::new(get_build_in_ctx()));
+                let _ = eval_statements(&statements, ctx.clone(), true);
             }
             Err(e) => {
                 eprintln!("Error reading file {}: {}", filename, e);
             }
         }
     } else {
-        let mut ctx = Rc::new(RefCell::new(get_build_in_ctx()));
+        let ctx = Rc::new(RefCell::new(get_build_in_ctx()));
         loop {
             print!(">>> ");
             io::stdout().flush().unwrap();
@@ -62,14 +62,11 @@ fn main() {
                             }
                         }
                     }
-
                 }
                 Err(e) => eprintln!("Error reading input: {}", e),
             }
         }
     }
-
-
 }
 
 /*

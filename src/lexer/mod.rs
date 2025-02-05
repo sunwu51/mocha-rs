@@ -50,7 +50,6 @@ pub enum TokenKind {
     CONTINUE,
     BREAK,
     FOR,
-    NEWLINE,
     EOF,
     NEW,
     CLASS,

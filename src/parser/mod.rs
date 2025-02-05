@@ -3,7 +3,6 @@ pub mod parser;
 use crate::lexer::TokenKind::{LBRACKET, LPAREN};
 use crate::lexer::{Token, TokenKind};
 use phf::{phf_map, Map};
-use std::ops::Index;
 
 #[derive(Clone, Debug)]
 pub enum Statement {

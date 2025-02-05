@@ -1,3 +1,4 @@
+#[warn(unused_assignments)]
 use crate::eval::{
     get_false, get_null, get_true, Context, Element, ErrorElement, ErrorInfo, SimpleError,
     PROTO_TYPE,
@@ -5,22 +6,19 @@ use crate::eval::{
 use crate::lexer::TokenKind;
 use crate::lexer::TokenKind::{DECREMENT, INCREMENT, LBRACKET, MINUS, NOT, PLUS, POINT};
 use crate::parser::{
-    AstNode, BlockStatement, FunctionCallAstNode, IdentifierAstNode, IndexAstNode,
-    InfixOperatorAstNode, OperatorAstNode, PostfixOperatorAstNode, PrefixOperatorAstNode,
-    Statement,
+    AstNode, BlockStatement, FunctionCallAstNode, IndexAstNode, InfixOperatorAstNode,
+    OperatorAstNode, PostfixOperatorAstNode, PrefixOperatorAstNode, Statement,
 };
 use log::debug;
-use std::any::Any;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::fmt::format;
 use std::panic;
 use std::panic::{panic_any, AssertUnwindSafe};
 use std::rc::Rc;
 
 pub(crate) fn eval_expression(
     ast_node: &AstNode,
-    mut ctx: Rc<RefCell<Context>>,
+    ctx: Rc<RefCell<Context>>,
 ) -> Rc<RefCell<Element>> {
     let null = get_null();
     match ast_node {
@@ -29,17 +27,23 @@ pub(crate) fn eval_expression(
             let str = number_ast_node.to_string();
             match str.parse::<f64>() {
                 Ok(num) => Rc::new(RefCell::new(Element::new_number(num))),
-                Err(e) => panic_any(SimpleError::new(&format!("{}", format!("Failed to parse number: {}", e)))),
+                Err(e) => panic_any(SimpleError::new(&format!(
+                    "{}",
+                    format!("Failed to parse number: {}", e)
+                ))),
             }
         }
         AstNode::Boolean(bool_ast_node) => {
             let str = bool_ast_node.to_string();
             match str.parse::<bool>() {
                 Ok(b) => Rc::new(RefCell::new(Element::new_boolean(b))),
-                Err(e) => panic_any(SimpleError::new(&format!("{}", format!("Failed to parse bool: {}", e)))),
+                Err(e) => panic_any(SimpleError::new(&format!(
+                    "{}",
+                    format!("Failed to parse bool: {}", e)
+                ))),
             }
         }
-        AstNode::Null(null_ast_node) => null,
+        AstNode::Null(_) => null,
         AstNode::Str(str_ast_node) => {
             let str = str_ast_node.to_string();
             Rc::new(RefCell::new(Element::new_string(str)))
@@ -90,7 +94,7 @@ pub(crate) fn eval_expression(
                             .args
                             .iter()
                             .map(|e| {
-                                let mut arg_res = eval_expression(e, ctx.clone());
+                                let arg_res = eval_expression(e, ctx.clone());
                                 format!("{}", arg_res.borrow().to_string())
                             })
                             .collect::<Vec<String>>()
@@ -113,9 +117,7 @@ pub(crate) fn eval_expression(
                 }
                 // 对象方法
                 AstNode::Operator(OperatorAstNode::InfixOperatorAstNode(
-                    InfixOperatorAstNode {
-                        token, left, right, ..
-                    },
+                    InfixOperatorAstNode { left, right, .. },
                 )) => {
                     // xx.method() => 先对xx求值，结果赋值给_this；然后找到method这个functionElement
                     let kind = function_expression.get_token().kind;
@@ -154,7 +156,7 @@ pub(crate) fn eval_expression(
                         }
                     }
                 }
-                _ => ()
+                _ => (),
             }
 
             // 其他形式，例如 "b()()",函数的返回值也是个函数，直接去调用
@@ -208,18 +210,17 @@ pub(crate) fn eval_expression(
             }
 
             if let AstNode::Operator(OperatorAstNode::InfixOperatorAstNode(
-                InfixOperatorAstNode {
-                    token, left, right, ..
-                },
+                InfixOperatorAstNode { right, .. },
             )) = function_expression
             {
                 if right.is_some() && right.as_ref().unwrap().to_string() == "constructor" {
                     return get_null();
                 }
             }
-            panic_any(SimpleError::new(
-                &format!("{} is not a function", function_expression.to_string())
-            ));
+            panic_any(SimpleError::new(&format!(
+                "{} is not a function",
+                function_expression.to_string()
+            )));
         }
         AstNode::ArrayDeclaration(array_declaration) => {
             let vec = array_declaration
@@ -241,7 +242,7 @@ pub(crate) fn eval_expression(
 
             let borrow_ref = &*cls_element.borrow();
 
-            if let Element::ProtoType { common, .. } = borrow_ref {
+            if let Element::ProtoType { .. } = borrow_ref {
                 // 1 创建空对象
                 let mut this_element = Element::new();
                 // 2 当前对象原型 指向 类的原型
@@ -271,16 +272,16 @@ pub(crate) fn eval_expression(
                         args,
                         Some(this.clone()),
                         su,
-                        &format!(
-                            "{}:{}",
-                            new_ast_node.token.line, new_ast_node.token.column
-                        ),
+                        &format!("{}:{}", new_ast_node.token.line, new_ast_node.token.column),
                     );
                 }
                 debug!("new对象，{} {}", class_name, this.borrow().to_string());
                 this
             } else {
-                panic_any(SimpleError::new(&format!("{} is not a class", new_ast_node.class.to_string())));
+                panic_any(SimpleError::new(&format!(
+                    "{} is not a class",
+                    new_ast_node.class.to_string()
+                )));
             }
         }
         // AstNode::None() => {},
@@ -290,7 +291,7 @@ pub(crate) fn eval_expression(
 
 fn eval_prefix_operator(
     pre: &PrefixOperatorAstNode,
-    mut ctx: Rc<RefCell<Context>>,
+    ctx: Rc<RefCell<Context>>,
 ) -> Rc<RefCell<Element>> {
     let right = eval_expression(pre.right.as_ref().unwrap(), ctx);
 
@@ -327,18 +328,21 @@ fn eval_prefix_operator(
             _ => panic_any(SimpleError::new("prefix operator + should before number")),
         };
     }
-    panic_any(SimpleError::new(&format!("operator {} not supported now", pre.token.value)))
+    panic_any(SimpleError::new(&format!(
+        "operator {} not supported now",
+        pre.token.value
+    )))
 }
 fn eval_infix_operator(
     infix: &InfixOperatorAstNode,
-    mut ctx: Rc<RefCell<Context>>,
+    ctx: Rc<RefCell<Context>>,
 ) -> Rc<RefCell<Element>> {
     let mut res = get_null();
     match infix.token.kind {
         TokenKind::ASSIGN => {
             let left = infix.left.as_ref().unwrap().as_ref();
             match left {
-                AstNode::Ident(name) => {
+                AstNode::Ident(_) => {
                     let value =
                         eval_expression(infix.right.as_ref().unwrap().as_ref(), ctx.clone());
                     ctx.borrow_mut().update(&left.to_string(), value);
@@ -353,7 +357,7 @@ fn eval_infix_operator(
                         if token.kind == POINT {
                             let property = property.clone().unwrap();
                             match property.as_ref() {
-                                AstNode::Ident(ident) => {
+                                AstNode::Ident(_) => {
                                     let this = eval_expression(&this.clone().unwrap(), ctx.clone());
                                     let property = property.to_string();
                                     let value = eval_expression(
@@ -381,7 +385,9 @@ fn eval_infix_operator(
                                             match &mut *this.borrow_mut() {
                                                 Element::Array { ref mut array, .. } => {
                                                     if index >= array.len() {
-                                                        panic_any(SimpleError::new("Index out of bounds"));
+                                                        panic_any(SimpleError::new(
+                                                            "Index out of bounds",
+                                                        ));
                                                     }
                                                     let value = eval_expression(
                                                         infix.right.as_ref().unwrap().as_ref(),
@@ -658,20 +664,21 @@ fn eval_infix_operator(
                 }
             };
         }
-        _ => {
-            panic_any(SimpleError::new(&format!("operator {} not supported now", infix.token.value)))
-        }
+        _ => panic_any(SimpleError::new(&format!(
+            "operator {} not supported now",
+            infix.token.value
+        ))),
     }
 
     res
 }
 fn eval_postfix_operator(
     post: &PostfixOperatorAstNode,
-    mut ctx: Rc<RefCell<Context>>,
+    ctx: Rc<RefCell<Context>>,
 ) -> Rc<RefCell<Element>> {
-    let mut cur_value = 0.0;
+    let cur_value;
     if post.token.kind == TokenKind::INCREMENT {
-        let mut left = eval_expression(post.left.as_ref().unwrap(), ctx.clone());
+        let left = eval_expression(post.left.as_ref().unwrap(), ctx.clone());
         match &mut *left.borrow_mut() {
             Element::Number { value, .. } => {
                 cur_value = *value;
@@ -691,11 +698,14 @@ fn eval_postfix_operator(
         }
         Rc::new(RefCell::new(Element::new_number(cur_value)))
     } else {
-        panic_any(SimpleError::new(&format!("operator {} not supported now", post.token.value)))
+        panic_any(SimpleError::new(&format!(
+            "operator {} not supported now",
+            post.token.value
+        )))
     }
 }
 
-fn eval_statement(statement: &Statement, mut ctx: Rc<RefCell<Context>>) -> Rc<RefCell<Element>> {
+fn eval_statement(statement: &Statement, ctx: Rc<RefCell<Context>>) -> Rc<RefCell<Element>> {
     debug!("Now eval statement: {:?}", statement.to_string());
     match statement {
         Statement::None() => get_null(),
@@ -801,10 +811,17 @@ fn eval_statement(statement: &Statement, mut ctx: Rc<RefCell<Context>>) -> Rc<Re
                         Ok(simple_err) => {
                             // 捕捉到异常，不再向上抛出
                             let err = *simple_err;
-                            let err_element = Element::Error(ErrorElement::new(&err.msg, err.stack));
+                            let err_element =
+                                Element::Error(ErrorElement::new(&err.msg, err.stack));
                             let mut catch_ctx = Context::new(Some(ctx.clone()));
-                            catch_ctx.set(&try_catch_statement.identifier.to_string(), Rc::new(RefCell::new(err_element)));
-                            eval_block(&try_catch_statement.catch_body, Rc::new(RefCell::new(catch_ctx)));
+                            catch_ctx.set(
+                                &try_catch_statement.identifier.to_string(),
+                                Rc::new(RefCell::new(err_element)),
+                            );
+                            eval_block(
+                                &try_catch_statement.catch_body,
+                                Rc::new(RefCell::new(catch_ctx)),
+                            );
                         }
                         Err(e) => panic_any(e),
                     }
@@ -819,14 +836,15 @@ fn eval_statement(statement: &Statement, mut ctx: Rc<RefCell<Context>>) -> Rc<Re
                 Some(parent) => {
                     let el = ctx.borrow().get(&parent.to_string());
                     let el_clone = el.clone();
-                    let mut res = None;
+                    let res;
                     match &*el.borrow() {
                         Element::ProtoType { .. } => {
                             res = Some(el_clone);
                         }
-                        _ => panic_any(SimpleError::new(
-                            &format!("parent class {} must be a class", parent.to_string()))
-                        ),
+                        _ => panic_any(SimpleError::new(&format!(
+                            "parent class {} must be a class",
+                            parent.to_string()
+                        ))),
                     };
                     res
                 }
@@ -846,7 +864,10 @@ fn eval_statement(statement: &Statement, mut ctx: Rc<RefCell<Context>>) -> Rc<Re
                 if let Element::Function { .. } = borrow_ref {
                     methods.insert(name.to_string(), function_clone);
                 } else {
-                    panic_any(SimpleError::new(&format!("{}#{} must be a function", class_name, name)));
+                    panic_any(SimpleError::new(&format!(
+                        "{}#{} must be a function",
+                        class_name, name
+                    )));
                 }
             }
             // 在语法分析中，我们已经把类中的字段赋值的语法糖写法，转为了在constructor中赋值，所以类中只有方法。
@@ -866,7 +887,7 @@ pub fn eval_block(block: &BlockStatement, new_ctx: Rc<RefCell<Context>>) -> Rc<R
 
 pub fn eval_statements(
     statements: &Vec<Statement>,
-    mut ctx: Rc<RefCell<Context>>,
+    ctx: Rc<RefCell<Context>>,
     exit_when_panic: bool,
 ) -> Rc<RefCell<Element>> {
     let mut res = get_null();

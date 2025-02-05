@@ -1,5 +1,5 @@
-use serde_json::Value;
 use crate::lexer::{Token, TokenKind, KEYWORDS};
+use serde_json::Value;
 
 pub fn lex(input: &str) -> Vec<Token> {
     let input: Vec<char> = input.chars().collect();
@@ -336,16 +336,20 @@ pub fn lex(input: &str) -> Vec<Token> {
                     position += 1;
                     // 字符中间不能有回车
                     if position >= len {
-                        let err_info = format!("Unterminated string at line: {:b}:{:b}",
-                                               line,
-                                               position - cur_line_start + 1);
+                        let err_info = format!(
+                            "Unterminated string at line: {:b}:{:b}",
+                            line,
+                            position - cur_line_start + 1
+                        );
                         eprintln!("{}", err_info);
                         panic!("{}", err_info);
                     }
                     if input[position] == '\n' {
-                        let err_info = format!("Enter is not allowed in string at line: {:b}:{:b}",
-                                               line,
-                                               (position - cur_line_start + 1));
+                        let err_info = format!(
+                            "Enter is not allowed in string at line: {:b}:{:b}",
+                            line,
+                            (position - cur_line_start + 1)
+                        );
                         eprintln!("{}", err_info);
                         panic!("{}", err_info);
                     }
@@ -368,16 +372,20 @@ pub fn lex(input: &str) -> Vec<Token> {
                     position += 1;
                     // 字符中间不能有回车
                     if position >= len {
-                        let err_info = format!("Unterminated string at line: {:b}:{:b}",
-                                               line,
-                                               position - cur_line_start + 1);
+                        let err_info = format!(
+                            "Unterminated string at line: {:b}:{:b}",
+                            line,
+                            position - cur_line_start + 1
+                        );
                         eprintln!("{}", err_info);
                         panic!("{}", err_info);
                     }
                     if input[position] == '\n' {
-                        let err_info = format!("Enter is not allowed in string at line: {:b}:{:b}",
-                                               line,
-                                               (position - cur_line_start + 1));
+                        let err_info = format!(
+                            "Enter is not allowed in string at line: {:b}:{:b}",
+                            line,
+                            (position - cur_line_start + 1)
+                        );
                         eprintln!("{}", err_info);
                         panic!("{}", err_info);
                     }
@@ -435,9 +443,11 @@ pub fn lex(input: &str) -> Vec<Token> {
                 }
             }
             _ => {
-                let err_info = format!("Invalid character at line: {}:{}",
-                                       line,
-                                       (position - cur_line_start + 1));
+                let err_info = format!(
+                    "Invalid character at line: {}:{}",
+                    line,
+                    (position - cur_line_start + 1)
+                );
                 eprintln!("{}", err_info);
                 panic!("{}", err_info);
             }
@@ -479,4 +489,3 @@ fn escape_quotes(input: &str) -> String {
 
     escaped
 }
-
